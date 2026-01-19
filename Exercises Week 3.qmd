@@ -117,9 +117,6 @@ To calculate it, first write this code to determine how accurate *each person* w
 summary_data <- data_complete %>%
   group_by(ResponseId, Block, Stim_Type) %>%
   summarize(accuracy = mean(answer))
-
-wide_data <- summary_data %>%
-  pivot_wider(names_from = Stim_Type, values_from = accuracy)
 ```
 
 Right now, your Harsh scores and Lenient scores are in different rows. *To compare them easily, use pivot_wider() so that 'Harsh' and 'Lenient' become their own columns.*

@@ -1,0 +1,220 @@
+---
+title: "hypothesis1Project"
+format:  
+  html:
+    self_contained: true
+    toc: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false 
+  error: false
+editor: visual
+author: Abir Rached
+date: Feb 2026
+---
+
+# Introduction
+
+While global moral preferences show strong regularities in the Moral machine paper, I hypothesize that individuals vary in their propensity to deviate from these majority norms. More specifically, I hypothesize that it is related to cultural context rather than random choice.
+
+**H1:** Cultural and socioeconomic context predicts the *consistency* with which individuals adhere to global majority moral preferences across dilemmas.
+
+## Data transformation
+
+```{r}
+library(vroom)
+#df <- vroom("SharedResponsesFullFirstSessions.csv", progress = TRUE)
+```
+
+```{r}
+#library(dplyr)
+#set.seed(123)
+
+#sampled_ids <- df %>%
+  #distinct(ResponseID) %>%
+  #slice_sample(n = 50000)
+
+#df_sample <- df %>%
+ # semi_join(sampled_ids, by = "ResponseID")
+```
+
+```{r}
+df_sample <- readRDS("df_sample.rds")
+
+df_sample %>%
+  count(ResponseID, UserID) %>%
+  count(n) %>%
+  print(n = 50)
+```
+
+```{r}
+df_sample %>%
+  count(ResponseID, UserID) %>%
+  count(n) %>%
+  print(n = 50)
+```
+
+```{r}
+saveRDS(df_sample, "fullRsample.rds")
+```
+
+```{r}
+culture <- read.csv("cultures.csv")
+```
+
+```{r}
+library(dplyr)
+scenario_data <- df_sample %>%
+  group_by(ResponseID, UserID, ScenarioTypeStrict,UserCountry3) %>%
+  filter(sum(Saved == 1, na.rm = TRUE) == 1) %>%  # exactly one chosen
+  summarise(
+    chosen_attribute = AttributeLevel[Saved == 1][1],
+    .groups = "drop"
+  )
+
+```
+
+Attributes such as gender or social status are omitted because their effects, while present, are weak, culturally variable, and lack a consistent global majority direction, unlike the core attributes retained in the table.
+
+```{r}
+majority_map <- tibble::tibble(
+  ScenarioTypeStrict = c("Age", "Utilitarian", "Species", "Fitness"),
+  majority_attribute = c("Young", "More", "Hoomans", "Fit")
+)
+majority_map
+```
+
+```{r}
+scenario_flagged <- scenario_data %>%
+  inner_join(majority_map, by = "ScenarioTypeStrict") %>%
+  mutate(
+    against_majority = chosen_attribute != majority_attribute
+  )
+against_majority_data <- scenario_flagged %>%
+  filter(against_majority)
+
+scenario_flagged
+```
+
+```{r}
+table(scenario_flagged$ScenarioTypeStrict)
+prop.table(table(scenario_flagged$against_majority))
+```
+
+## Descriptive Statistics
+
+```{r}
+scenario_flagged %>%
+  group_by(ScenarioTypeStrict) %>%
+  summarise(
+    n = n(),
+    prop_against = mean(against_majority, na.rm = TRUE)
+  ) %>%
+  arrange(desc(prop_against))
+```
+
+```{r}
+country_summary <- scenario_flagged %>%
+  group_by(UserCountry3) %>%
+  summarise(
+    n = n(),
+    prop_against = mean(against_majority, na.rm = TRUE)
+  ) %>%
+  filter(n >= 200)   # stability threshold
+```
+
+```{r}
+head(arrange(country_summary, desc(prop_against)), 10)
+head(arrange(country_summary, prop_against), 10)
+```
+
+```{r}
+individual_consistency <- scenario_flagged %>%
+  group_by(UserID) %>%
+  summarise(
+    n = n(),
+    prop_against = mean(against_majority, na.rm = TRUE), .groups = "drop"
+  ) %>%
+  filter(n >= 2)
+```
+
+```{r}
+summary(individual_consistency$prop_against)
+```
+
+```{r}
+scenario_flagged %>%
+  group_by(UserCountry3, ScenarioTypeStrict) %>%
+  summarise(
+    prop_against = mean(against_majority),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 100)
+```
+
+```{r}
+chisq.test(
+  table(scenario_flagged$ScenarioTypeStrict,
+        scenario_flagged$against_majority)
+)
+```
+
+```{r}
+scenario_flagged <- scenario_flagged %>%
+  left_join(culture, by = c("UserCountry3"="countries"))
+```
+
+```{r}
+country_summary %>%
+  group_by(scenario_flagged$categories) %>%
+  summarise(
+    n = n(),
+    mean_against = mean(prop_against, na.rm = TRUE),
+    sd_against = sd(prop_against, na.rm = TRUE),
+    median_against = median(prop_against, na.rm = TRUE),
+    iqr_against = IQR(prop_against, na.rm = TRUE), 
+    .groups = "drop"
+  )
+```
+
+Across the 31 culture categories, the average proportion of “against‑majority” choices is about 0.294 (29.4%), with relatively low variability between categories (SD ≈ 0.0247). The median is essentially the same (≈ 0.295), and the IQR is narrow (≈ 0.0179), which implies that most culture categories cluster tightly around that \~29–30% level rather than showing large differences. Through this, it seems that cultural grouping does not appear to produce large shifts in the share of against‑majority decisions.
+
+## Inferential Statistics
+
+I estimate a weighted linear model with country‑level deviation from the global majority (prop_against) as the outcome and cultural category as the predictor. This model tests the hypothesis that deviations from the global majority moral preference vary systematically across cultural contexts by comparing mean deviation rates across categories.
+
+```{r}
+country_summary <- country_summary %>%
+  left_join(culture, by = c("UserCountry3" = "countries"))
+```
+
+```{r}
+wls_fit <- lm(prop_against ~ categories, data = country_summary, weights = n)
+summary(wls_fit)
+```
+
+The intercept (0.303) represents the estimated baseline share of “against‑majority” choices for the reference cultural category—about 30%. Each culture coefficient is the difference from that baseline. The effects are small: most categories are only 1–4 percentage points above or below the baseline (e.g., Islamic ≈ +4.2 points, Catholic ≈ −1.2 points). Overall, this suggests that cultural categories shift the proportion of against‑majority choices only modestly, with no large departures from the baseline. The model’s fit is moderate (R² ≈ 0.43), but the practical differences between categories appear limited in size.
+
+## Illustration of hypothesis
+
+This figure below illustrates the hypothesis that the cultural context is correlated with deviation from global majority
+
+```{r}
+library(dagitty)
+library(ggdag)
+
+dag <- dagitty('
+dag {
+  C [label="Cultural Context (category)"]
+  N [label="Country Sample Size (n)"]
+  D [label="Deviation from Global Majority (prop_against)"]
+  C -> D
+  N -> D
+}
+')
+
+ggdag(dag) + theme_dag()
+```
